@@ -168,12 +168,60 @@ func (api *API) handleCreateSubscription(ctx context.Context, request events.API
 	return jsonResponse(http.StatusCreated, user)
 }
 
-func (api *API) handleGetCredits(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	// Get user from context
-	user := ctx.Value("user").(*models.User)
-	userID := user.ID
+func (api *API) handleRegister(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	var req struct {
+		Email    string `json:"email"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal([]byte(request.Body), &req); err != nil {
+		return errorResponse(http.StatusBadRequest, "invalid request"), nil
+	}
 
-	credits, err := api.billingService.GetUserCredits(ctx, userID)
+	user, err := api.authService.RegisterUser(ctx, req.Email, req.Username, req.Password)
+	if err != nil {
+		if err == auth.ErrUserExists {
+			return errorResponse(http.StatusConflict, "user already exists"), nil
+		}
+		return errorResponse(http.StatusInternalServerError, "failed to register user"), nil
+	}
+
+	return jsonResponse(http.StatusCreated, user)
+}
+
+func (api *API) handleLogin(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal([]byte(request.Body), &req); err != nil {
+		return errorResponse(http.StatusBadRequest, "invalid request"), nil
+	}
+
+	token, err := api.authService.LoginUser(ctx, req.Email, req.Password)
+	if err != nil {
+		if err == auth.ErrInvalidCredentials {
+			return errorResponse(http.StatusUnauthorized, "invalid credentials"), nil
+		}
+		return errorResponse(http.StatusInternalServerError, "failed to login"), nil
+	}
+
+	return jsonResponse(http.StatusOK, map[string]string{"token": token})
+}
+
+func (api *API) handleGetCredits(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	// Authenticate user
+	token, err := auth.ExtractTokenFromRequest(request)
+	if err != nil {
+		return errorResponse(http.StatusUnauthorized, "unauthorized"), nil
+	}
+
+	user, err := api.authService.VerifyToken(ctx, token)
+	if err != nil {
+		return errorResponse(http.StatusUnauthorized, "invalid token"), nil
+	}
+
+	credits, err := api.billingService.GetUserCredits(ctx, user.ID)
 	if err != nil {
 		return errorResponse(http.StatusInternalServerError, "failed to get credits"), nil
 	}
