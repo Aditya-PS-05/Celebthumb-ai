@@ -169,10 +169,9 @@ func (api *API) handleCreateSubscription(ctx context.Context, request events.API
 }
 
 func (api *API) handleGetCredits(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	userID := request.QueryStringParameters["userId"]
-	if userID == "" {
-		return errorResponse(http.StatusBadRequest, "userId is required"), nil
-	}
+	// Get user from context
+	user := ctx.Value("user").(*models.User)
+	userID := user.ID
 
 	credits, err := api.billingService.GetUserCredits(ctx, userID)
 	if err != nil {
