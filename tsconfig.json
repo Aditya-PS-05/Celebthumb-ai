@@ -1,0 +1,12 @@
+{
+  "extends": "@tsconfig/node18/tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "@celebthumb-ai/*": ["packages/*/src"]
+    }
+  },
+  "include": ["infrastructure/**/*.ts", "packages/**/*.ts"]
+}
