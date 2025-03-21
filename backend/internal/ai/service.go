@@ -20,13 +20,6 @@ type AIConfig struct {
 	SagemakerClient  *sagemaker.Client
 }
 
-func NewAIService(config AIConfig) *AIService {
-	return &AIService{
-		rekognitionClient: config.RekognitionClient,
-		sagemakerClient:  config.SagemakerClient,
-	}
-}
-
 type GenerationParams struct {
 	VideoTitle  string
 	Description string
