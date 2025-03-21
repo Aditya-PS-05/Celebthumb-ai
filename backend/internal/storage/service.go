@@ -35,7 +35,7 @@ func (s *StorageService) SaveThumbnail(ctx context.Context, thumbnail *models.Th
 	_, err := s.s3Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucket),
 		Key:         aws.String(key),
-		Body:        aws.ReadSeekCloser(data),
+		Body:        aws.NewReadSeekCloser(data),
 		ContentType: aws.String("image/jpeg"),
 		Metadata: map[string]string{
 			"userId":      thumbnail.UserID,

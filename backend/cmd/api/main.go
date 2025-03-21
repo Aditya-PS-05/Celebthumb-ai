@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -10,11 +11,13 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/rekognition"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sagemaker"
 	"github.com/celebthumb-ai/internal/ai"
+	"github.com/celebthumb-ai/internal/auth"
 	"github.com/celebthumb-ai/internal/billing"
 	"github.com/celebthumb-ai/internal/models"
 	"github.com/celebthumb-ai/internal/storage"
@@ -24,6 +27,7 @@ type API struct {
 	aiService      *ai.AIService
 	storageService *storage.StorageService
 	billingService *billing.BillingService
+	authService    *auth.AuthService
 }
 
 func handleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -48,6 +52,11 @@ func handleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 			TableName:    os.Getenv("USERS_TABLE"),
 			StripeKey:    os.Getenv("STRIPE_SECRET_KEY"),
 		}),
+		authService: auth.NewAuthService(auth.AuthConfig{
+			CognitoClient: cognitoidentityprovider.NewFromConfig(cfg),
+			UserPoolID:    os.Getenv("USER_POOL_ID"),
+			ClientID:      os.Getenv("USER_POOL_CLIENT_ID"),
+		}),
 	}
 
 	// Route request
@@ -64,6 +73,10 @@ func handleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 		return api.handleCreateSubscription(ctx, request)
 	case request.HTTPMethod == "GET" && request.Path == "/credits":
 		return api.handleGetCredits(ctx, request)
+	case request.HTTPMethod == "POST" && request.Path == "/register":
+		return api.handleRegister(ctx, request)
+	case request.HTTPMethod == "POST" && request.Path == "/login":
+		return api.handleLogin(ctx, request)
 	default:
 		return errorResponse(http.StatusNotFound, "not found"), nil
 	}

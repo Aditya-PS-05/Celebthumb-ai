@@ -2,6 +2,7 @@ package billing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,7 +11,65 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/celebthumb-ai/internal/models"
+	"github.com/stripe/stripe-go/v76"
+	"github.com/stripe/stripe-go/v76/customer"
+	"github.com/stripe/stripe-go/v76/subscription"
 )
+
+var (
+	ErrInsufficientCredits = errors.New("insufficient credits")
+	ErrInvalidPlan        = errors.New("invalid subscription plan")
+)
+
+type Plan struct {
+	ID            string
+	Name          string
+	PriceID       string
+	Credits       int
+	PricePerMonth float64
+	Features      []string
+}
+
+var Plans = map[string]Plan{
+	"free": {
+		ID:            "free",
+		Name:          "Free Tier",
+		Credits:       10,
+		PricePerMonth: 0,
+		Features: []string{
+			"10 thumbnails per month",
+			"Basic styles",
+			"Standard quality",
+		},
+	},
+	"pro": {
+		ID:            "pro",
+		Name:          "Pro",
+		PriceID:       "price_pro",
+		Credits:       100,
+		PricePerMonth: 29.99,
+		Features: []string{
+			"100 thumbnails per month",
+			"Advanced styles",
+			"HD quality",
+			"Priority processing",
+		},
+	},
+	"enterprise": {
+		ID:            "enterprise",
+		Name:          "Enterprise",
+		PriceID:       "price_enterprise",
+		Credits:       1000,
+		PricePerMonth: 199.99,
+		Features: []string{
+			"1000 thumbnails per month",
+			"Custom styles",
+			"4K quality",
+			"Dedicated support",
+			"API access",
+		},
+	},
+}
 
 type BillingConfig struct {
 	DynamoClient *dynamodb.Client
@@ -25,6 +84,9 @@ type BillingService struct {
 }
 
 func NewBillingService(config BillingConfig) *BillingService {
+	// Initialize Stripe
+	stripe.Key = config.StripeKey
+	
 	return &BillingService{
 		dynamoClient: config.DynamoClient,
 		tableName:    config.TableName,
@@ -110,20 +172,40 @@ func (s *BillingService) AddCredits(ctx context.Context, userID string, amount i
 }
 
 func (s *BillingService) CreateSubscription(ctx context.Context, user *models.User, planID string) error {
-	// In a real implementation, this would create a subscription in Stripe
-	// For now, we'll just update the user's plan and add credits
+	// Check if plan exists
+	plan, ok := Plans[planID]
+	if !ok {
+		return ErrInvalidPlan
+	}
 
-	// Determine credits based on plan
-	var credits int
-	switch planID {
-	case "basic":
-		credits = 50
-	case "pro":
-		credits = 200
-	case "enterprise":
-		credits = 1000
-	default:
-		return fmt.Errorf("invalid plan ID")
+	// Create or update Stripe customer
+	params := &stripe.CustomerParams{
+		Email: &user.Email,
+		Metadata: map[string]string{
+			"userId": user.ID,
+		},
+	}
+	
+	cus, err := customer.New(params)
+	if err != nil {
+		return fmt.Errorf("failed to create stripe customer: %w", err)
+	}
+
+	// Create subscription if plan has a price ID
+	if plan.PriceID != "" {
+		subParams := &stripe.SubscriptionParams{
+			Customer: &cus.ID,
+			Items: []*stripe.SubscriptionItemsParams{
+				{
+					Price: &plan.PriceID,
+				},
+			},
+		}
+
+		_, err := subscription.New(subParams)
+		if err != nil {
+			return fmt.Errorf("failed to create subscription: %w", err)
+		}
 	}
 
 	// Update user in DynamoDB
@@ -131,7 +213,7 @@ func (s *BillingService) CreateSubscription(ctx context.Context, user *models.Us
 		ID:        user.ID,
 		Email:     user.Email,
 		Plan:      planID,
-		Credits:   credits,
+		Credits:   plan.Credits,
 		CreatedAt: time.Now(),
 	})
 	if err != nil {
@@ -148,7 +230,7 @@ func (s *BillingService) CreateSubscription(ctx context.Context, user *models.Us
 
 	// Update user object
 	user.Plan = planID
-	user.Credits = credits
+	user.Credits = plan.Credits
 
 	return nil
 }
